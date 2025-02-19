@@ -1,10 +1,8 @@
 services:
   deep-research:
     container_name: deep-research
-    build: .
+    build: https://github.com/lucasmcoleman/deep-research.git
     env_file:
       - .env.local
-    volumes:
-      -  ./:/app/
     tty: true
     stdin_open: true
