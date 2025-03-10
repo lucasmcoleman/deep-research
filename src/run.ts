@@ -1,15 +1,17 @@
 import * as fs from 'fs/promises';
 import * as readline from 'readline';
 
-import { deepResearch, writeFinalReport } from './deep-research';
+import { getModel } from './ai/providers';
+import {
+  deepResearch,
+  writeFinalAnswer,
+  writeFinalReport,
+} from './deep-research';
 import { generateFeedback } from './feedback';
-import { OutputManager } from './output-manager';
-
-const output = new OutputManager();
 
 // Helper function for consistent logging
 function log(...args: any[]) {
-  output.log(...args);
+  console.log(...args);
 }
 
 const rl = readline.createInterface({
@@ -28,6 +30,8 @@ function askQuestion(query: string): Promise<string> {
 
 // run the agent
 async function run() {
+  console.log('Using model: ', getModel().modelId);
+
   // Get initial query
   const initialQuery = await askQuestion('What would you like to research? ');
 
@@ -44,62 +48,72 @@ async function run() {
       await askQuestion('Enter research depth (recommended 1-5, default 2): '),
       10,
     ) || 2;
+  const isReport =
+    (await askQuestion(
+      'Do you want to generate a long report or a specific answer? (report/answer, default report): ',
+    )) === 'report';
 
-  log(`Creating research plan...`);
+  let combinedQuery = initialQuery;
+  if (isReport) {
+    log(`Creating research plan...`);
 
-  // Generate follow-up questions
-  const followUpQuestions = await generateFeedback({
-    query: initialQuery,
-  });
+    // Generate follow-up questions
+    const followUpQuestions = await generateFeedback({
+      query: initialQuery,
+    });
 
-  log(
-    '\nTo better understand your research needs, please answer these follow-up questions:',
-  );
+    log(
+      '\nTo better understand your research needs, please answer these follow-up questions:',
+    );
 
-  // Collect answers to follow-up questions
-  const answers: string[] = [];
-  for (const question of followUpQuestions) {
-    const answer = await askQuestion(`\n${question}\nYour answer: `);
-    answers.push(answer);
-  }
+    // Collect answers to follow-up questions
+    const answers: string[] = [];
+    for (const question of followUpQuestions) {
+      const answer = await askQuestion(`\n${question}\nYour answer: `);
+      answers.push(answer);
+    }
 
-  // Combine all information for deep research
-  const combinedQuery = `
+    // Combine all information for deep research
+    combinedQuery = `
 Initial Query: ${initialQuery}
 Follow-up Questions and Answers:
 ${followUpQuestions.map((q: string, i: number) => `Q: ${q}\nA: ${answers[i]}`).join('\n')}
 `;
+  }
 
-  log('\nResearching your topic...');
+  log('\nStarting research...\n');
 
-  log('\nStarting research with progress tracking...\n');
-  
   const { learnings, visitedUrls } = await deepResearch({
     query: combinedQuery,
     breadth,
     depth,
-    onProgress: (progress) => {
-      output.updateProgress(progress);
-    },
   });
 
   log(`\n\nLearnings:\n\n${learnings.join('\n')}`);
-  log(
-    `\n\nVisited URLs (${visitedUrls.length}):\n\n${visitedUrls.join('\n')}`,
-  );
+  log(`\n\nVisited URLs (${visitedUrls.length}):\n\n${visitedUrls.join('\n')}`);
   log('Writing final report...');
 
-  const report = await writeFinalReport({
-    prompt: combinedQuery,
-    learnings,
-    visitedUrls,
-  });
+  if (isReport) {
+    const report = await writeFinalReport({
+      prompt: combinedQuery,
+      learnings,
+      visitedUrls,
+    });
 
-  // Save report to file
-  await fs.writeFile('output.md', report, 'utf-8');
+    await fs.writeFile('report.md', report, 'utf-8');
+    console.log(`\n\nFinal Report:\n\n${report}`);
+    console.log('\nReport has been saved to report.md');
+  } else {
+    const answer = await writeFinalAnswer({
+      prompt: combinedQuery,
+      learnings,
+    });
 
-  console.log(`\n\nFinal Report:\n\n${report}`);
-  console.log('\nReport has been saved to output.md');
+    await fs.writeFile('answer.md', answer, 'utf-8');
+    console.log(`\n\nFinal Answer:\n\n${answer}`);
+    console.log('\nAnswer has been saved to answer.md');
+  }
+
   rl.close();
 }
 
